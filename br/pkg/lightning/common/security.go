@@ -78,6 +78,32 @@ func ToTLSConfig(caPath, certPath, keyPath string) (*tls.Config, error) {
 	}, nil
 }
 
+// ToTLSConfigWithRawBytes constructs a `*tls.Config` from the CA, certification and key
+// raw bytes
+//
+// If the CA path is empty, returns nil.
+func ToTLSConfigWithRawBytes(caData, certData, keyData []byte) (*tls.Config, error) {
+	if len(caData) == 0 || len(certData) == 0 || len(keyData) == 0 {
+		return nil, nil
+	}
+	cert, err := tls.X509KeyPair(certData, keyData)
+	if err != nil {
+		return nil, errors.New("failed to generate cert")
+	}
+	certificates := []tls.Certificate{cert}
+	// Create a certificate pool from CA
+	certPool := x509.NewCertPool()
+	// Append the certificates from the CA
+	if !certPool.AppendCertsFromPEM(caData) {
+		return nil, errors.New("failed to append ca certs")
+	}
+	return &tls.Config{
+		Certificates: certificates,
+		RootCAs:      certPool,
+		NextProtos:   []string{"h2", "http/1.1"}, // specify `h2` to let Go use HTTP/2.
+	}, nil
+}
+
 // NewTLS constructs a new HTTP client with TLS configured with the CA,
 // certificate and key paths.
 //
@@ -101,6 +127,29 @@ func NewTLS(caPath, certPath, keyPath, host string) (*TLS, error) {
 		inner:    inner,
 		client:   httputil.NewClient(inner),
 		url:      "https://" + host,
+	}, nil
+}
+
+// NewTLSFromRawBytes constructs a new HTTP client with TLS configured with the CA,
+// certificate and key raw bytes.
+//
+// If the CA path is empty, returns an instance where TLS is disabled.
+func NewTLSFromRawBytes(host string, caData, certData, keyData []byte) (*TLS, error) {
+	if len(caData) == 0 || len(certData) == 0 || len(keyData) == 0 {
+		return &TLS{
+			inner:  nil,
+			client: &http.Client{},
+			url:    "http://" + host,
+		}, nil
+	}
+	inner, err := ToTLSConfigWithRawBytes(caData, certData, keyData)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+	return &TLS{
+		inner:  inner,
+		client: httputil.NewClient(inner),
+		url:    "https://" + host,
 	}, nil
 }
 
